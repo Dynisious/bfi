@@ -5,7 +5,7 @@
 
 #![deny(missing_docs,)]
 
-use nummap::NumMap;
+pub use nummap::NumMap;
 use std::io;
 
 pub mod parsing;
