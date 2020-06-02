@@ -62,6 +62,40 @@ impl Brainfuck {
 
     Ok(())
   }
+  /// Decompiles the instruction.
+  /// 
+  /// # Params
+  /// 
+  /// output --- The output to write too.  
+  pub fn decompile<O,>(&self, output: &mut O,) -> io::Result<()>
+    where O: Write, {
+    use Brainfuck::*;
+
+    match self {
+      Move(shift) => {
+        let shifts = std::iter::repeat(if *shift < 0 { &[b'<'] } else { &[b'>'] },)
+          .take(*shift as usize,);
+
+        for c in shifts { output.write_all(c,)? }
+      },
+      Update(change) => {
+        let changes = std::iter::repeat(if *change < 0 { &[b'-'] } else { &[b'+'] },)
+          .take(*change as isize as usize,);
+        
+        for c in changes { output.write_all(c,)? }
+      },
+      Output => output.write_all(&[b'.'],)?,
+      Input => output.write_all(&[b','],)?,
+      Loop(seq) => {
+        output.write_all(&[b'['],)?;
+        for instruction in seq { instruction.decompile(output,)? }
+        output.write_all(&[b']'],)?;
+      },
+      Sequence(seq) => for instruction in seq { instruction.decompile(output,)? },
+    }
+
+    Ok(())
+  }
 }
 
 /// Executes a sequence of instructions.
