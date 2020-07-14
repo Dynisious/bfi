@@ -4,8 +4,10 @@
 //! Last Modified --- 2020-06-03
 
 #![deny(missing_docs,)]
+#![feature(type_alias_impl_trait, try_blocks, try_trait,)]
 
 pub use nummap::NumMap;
+pub use parser;
 use std::io;
 
 pub mod parsing;
@@ -28,7 +30,10 @@ pub fn execute<I, O,>(program: &[u8], mut input: I, mut output: O,) -> io::Resul
   where I: io::Read,
     O: io::Write, {
   use parsing::Brainfuck;
+  use parser::ParseFn;
 
+  //Get the program parser.
+  let parser = parsing::error_parser(parsing::parse_complex(),);
   //Initialise the program state.
   let mut state = (NumMap::new(), 0,);
   //The program yet to be interperated.
@@ -36,21 +41,13 @@ pub fn execute<I, O,>(program: &[u8], mut input: I, mut output: O,) -> io::Resul
   //Process each instruction.
   loop {
     //Parse an instruction.
-    let (instruction, remainder,) = match parsing::parse_one(to_interp,) {
-      Ok(v) => v,
-      Err(e) => {
-        let index = program.len() - e.0.len();
-
-        return Err(io::Error::new(
-          io::ErrorKind::InvalidData,
-          //Return the index of the byte that failed.
-          format!("interperatation failed at byte {} `{}`", index, (program[index] as char).escape_default(),),
-        ))
-      },
+    let (remainder, instruction,) = match parser.parse(to_interp,).into() {
+      (remainder, Ok(v),) => (remainder, v,),
+      //If there is no instruction halt.
+      (&[], _,) => break,
+      //If there was an error return it.
+      (_, Err(e),) => return Err(e),
     };
-    //If there is no instruction halt.
-    let instruction = if let Some(v) = instruction { v }
-      else { break };
     //Store the remaining uninterperated program.
     to_interp = remainder;
 

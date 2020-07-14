@@ -8,3 +8,4 @@ edition = "2018"
 
 [dependencies]
 nummap = { version="0.5" }
+parser = { version="0.1", git = "https://github.com/Dynisious/parser" }
