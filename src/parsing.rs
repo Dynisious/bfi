@@ -121,14 +121,9 @@ fn execute_sequence<I, O,>(seq: &[Brainfuck], state: &mut CompState, input: &mut
   Ok(())
 }
 
-//Skip many non control characters.
-static NON_CONTROL: Parser<AsParser<fn(&[u8]) -> ParseResult<usize, &[u8]>,>,> = {
-  //Parse a non control character.
-  static NON_CONTROL: Parser<parsers::Skip<&u8, core::slice::Iter<u8>, ErrorKind, Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>>>>
-    = Parser(parsers::skip(Parser::next_is(|&&c,| CONTROL.iter().all(|&a,| a != c,),),),);
-
-  Parser::from_fn(|program,| NON_CONTROL.parse_slice(program,),)
-};
+//Parse a non control character.
+static NON_CONTROL: Parser<parsers::Slice<parsers::Skip<parsers::NextIs<fn(&&u8) -> bool>>>>
+  = Parser(parsers::slice_parser(parsers::skip(parsers::next_is(|&&c,| CONTROL.iter().all(|&a,| a != c,),),),),);
 
 /// The parser function for a simple instruction i.e. not a loop.
 pub type Simple<'a,> = impl ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
@@ -144,14 +139,14 @@ pub fn parse_simple<'a,>() -> Parser<Simple<'a,>> {
   //Convert value characters into value increments.
   let value = |&c: &u8,| -> i8 { if c == b'+' { 1 } else { -1 } };
   //Get value increments from input.
-  let value = Parser::next().filter_map(|&c,| VALUE.iter().find(|&&a,| c == a,),).map_ok(value,);
+  let value = Parser::next().filter_map(|&c,| VALUE.iter().find(|&&a,| c == a,),).map_ok(value,).slice_parser();
   //Sum sequences of value increments.
-  let value = Parser::from_fn(move |program,| try {
+  let value = Parser::as_parser(move |program,| try {
     //The initial increment.
-    let (mut program, mut shift,) = value.parse_slice(program,).map_err(|_,| program,)?;
+    let (mut program, mut shift,) = value.parse(program,).map_err(|_,| program,)?;
 
     //Sum all increments.
-    while let (remain, Ok(v),) = value.parse_slice(program,).into() {
+    while let (remain, Ok(v),) = value.parse(program,).into() {
       program = remain;
       shift = shift.wrapping_add(v,);
     }
@@ -162,14 +157,14 @@ pub fn parse_simple<'a,>() -> Parser<Simple<'a,>> {
   //Convert pointer characters into pointer shifts.
   let pointer = |&c: &u8,| -> isize { if c == b'>' { 1 } else { -1 } };
   //Get pointer shifts from input.
-  let pointer = Parser::next().filter_map(|&c,| POINTER.iter().find(|&&a,| c == a,),).map_ok(pointer,);
+  let pointer = Parser::next().filter_map(|&c,| POINTER.iter().find(|&&a,| c == a,),).map_ok(pointer,).slice_parser();
   //Sum sequences of pointer shifts.
-  let pointer = Parser::from_fn(move |program,| try {
+  let pointer = Parser::as_parser(move |program,| try {
     //Get the initial shift.
-    let (mut program, mut shift,) = pointer.parse_slice(program,).map_err(|_,| program,)?;
+    let (mut program, mut shift,) = pointer.parse(program,).map_err(|_,| program,)?;
 
     //Sum all shifts.
-    while let (remain, Ok(v),) = pointer.parse_slice(program,).into() {
+    while let (remain, Ok(v),) = pointer.parse(program,).into() {
       program = remain;
       shift = shift.wrapping_add(v,);
     }
@@ -180,9 +175,9 @@ pub fn parse_simple<'a,>() -> Parser<Simple<'a,>> {
   //Convert IO characters into instructions.
   let output = |&c: &u8,| -> Brainfuck { if c == b'.' { Brainfuck::Output } else { Brainfuck::Input } };
   //Get IO instructions from input.
-  let io = Parser::next().filter_map(|&c,| IO.iter().find(|&&a,| c == a,),).map_ok(output,);
+  let io = Parser::next().filter_map(|&c,| IO.iter().find(|&&a,| c == a,),).map_ok(output,).slice_parser();
   //Coerce the type interface to match.
-  let io = Parser::from_fn(move |program,| io.parse_slice(program,).map_err(|_,| program,),);
+  let io = Parser::as_parser(move |program,| io.parse(program,).map_err(|_,| program,),);
 
   //Skip any leading non control characters and merge the parsers.
   Parser(&NON_CONTROL).then(value.or(pointer,).or(io,),)
@@ -220,14 +215,16 @@ fn parse_sequence<'a, 'b, Value,>(sequence: &'b mut Vec<Brainfuck>, value: &Pars
 fn parse_loop<'a, Value,>(value: &Parser<Value>, program: &'a [u8],) -> ParseResult<Result<Option<Brainfuck>, &'a [u8]>, &'a [u8]>
   where Value: ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]>, {
   //Parses the start of a loop.
-  static START_LOOP: Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>> = Parser::next_is(|&&c: &&u8,| c == b'[',);
+  static START_LOOP: Parser<parsers::Slice<parsers::NextIs<fn(&&u8) -> bool>>>
+    = Parser(parsers::slice_parser(parsers::next_is(|&&c: &&u8,| c == b'[',),),);
   //Parses the end of a loop.
-  static END_LOOP: Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>> = Parser::next_is(|&&c: &&u8,| c == b']',);
+  static END_LOOP: Parser<parsers::Slice<parsers::NextIs<fn(&&u8) -> bool>>>
+    = Parser(parsers::slice_parser(parsers::next_is(|&&c: &&u8,| c == b']',),),);
 
   //Consume any leading non control characters.
   let program = NON_CONTROL.parse(program,).remaining;
   //Parse the start of the loop.
-  let program = START_LOOP.parse_slice(program,).map_err(|_,| program,)?.0;
+  let program = START_LOOP.parse(program,).map_err(|_,| program,)?.0;
 
   let mut seq = Vec::new();
   //Parse any leading sequence of instructions.
@@ -247,7 +244,7 @@ fn parse_loop<'a, Value,>(value: &Parser<Value>, program: &'a [u8],) -> ParseRes
   //Consume any leading non control characters.
   let program = NON_CONTROL.parse(program,).remaining;
   //Parse the close of the loop.
-  let program = END_LOOP.parse_slice(program,).map_err(|_,| program,)?.0;
+  let program = END_LOOP.parse(program,).map_err(|_,| program,)?.0;
   //If the loop is empty drop it.
   let result = Ok(if seq.is_empty() { None } else { Some(Brainfuck::Loop(seq)) });
 
@@ -261,7 +258,7 @@ pub type Complex<'a,> = impl ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8
 pub fn parse_complex<'a,>() -> Parser<Complex<'a,>> {
   let value = parse_simple();
 
-  Parser::from_fn(move |mut program,| {
+  Parser::as_parser(move |mut program,| {
     //Parse a loop, ignoring empty loops.
     while let Ok((remain, instruction,)) = parse_loop(&value, program,).into_result() {
       //Return the non empty loop.
@@ -284,7 +281,7 @@ pub fn parse_program<'a,>() -> Parser<Program<'a,>> {
   //Parse a sequence of instructions.
   parse_complex().list1()
   //If the sequence is a single instruction return it alone.
-  .map_ok(|mut seq,| if seq.len() > 1 { Brainfuck::Sequence(seq) }
+  .map_ok(|mut seq: Vec<_>,| if seq.len() > 1 { Brainfuck::Sequence(seq) }
     else { seq.pop().unwrap() },
   )
 }
@@ -295,7 +292,7 @@ pub type ErrorParser<'a, P,> = impl ParseFn<&'a [u8], Value = io::Result<Brainfu
 /// The `Parser` which converts the error from a parse into a more usable `io::Error`.
 pub fn error_parser<'a, P,>(parser: Parser<P,>,) -> Parser<ErrorParser<'a, P,>>
   where P: ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy, {
-  Parser::from_fn(move |program,| {
+  Parser::as_parser(move |program,| {
     //Map the error.
     parser.parse(program,).map_err(|e,| {
       //Get the index of the interpreter failure.
