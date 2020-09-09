@@ -122,17 +122,16 @@ fn execute_sequence<I, O,>(seq: &[Brainfuck], state: &mut CompState, input: &mut
 }
 
 //Skip many non control characters.
-static NON_CONTROL: parsers::Skip<&u8, &[u8], ErrorKind, Parser<AsParser<fn(&[u8]) -> ParseResult<Result<&u8, ErrorKind>, &[u8]>>>>
-  = parsers::skip(Parser::from_fn(move |program,| {
-    //Parse a non control character.
-    static NON_CONTROL: Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>>
-      = Parser::next_is(|&&c,| CONTROL.iter().all(|&a,| a != c,),);
+static NON_CONTROL: Parser<AsParser<fn(&[u8]) -> ParseResult<usize, &[u8]>,>,> = {
+  //Parse a non control character.
+  static NON_CONTROL: Parser<parsers::Skip<&u8, core::slice::Iter<u8>, ErrorKind, Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>>>>
+    = Parser(parsers::skip(Parser::next_is(|&&c,| CONTROL.iter().all(|&a,| a != c,),),),);
 
-    NON_CONTROL.parse_slice(program,)
-  },),);
+  Parser::from_fn(|program,| NON_CONTROL.parse_slice(program,),)
+};
 
 /// The parser function for a simple instruction i.e. not a loop.
-pub type Simple<'a,> = impl ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
+pub type Simple<'a,> = impl ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
 
 /// A `Parser` which attempts to parse a single simple instruction from the input.
 /// 
@@ -199,7 +198,7 @@ pub fn parse_simple<'a,>() -> Parser<Simple<'a,>> {
 /// value --- The value parser to apply.  
 /// program --- The input to parse.  
 fn parse_sequence<'a, 'b, Value,>(sequence: &'b mut Vec<Brainfuck>, value: &Parser<Value>, mut program: &'a [u8],) -> &'a [u8]
-  where Value: ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]>, {
+  where Value: ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]>, {
   //Apply `value` as many times as possible.
   while let (remain, Ok(v),) = value.parse(program,).into() {
     program = remain; sequence.push(v,);
@@ -219,7 +218,7 @@ fn parse_sequence<'a, 'b, Value,>(sequence: &'b mut Vec<Brainfuck>, value: &Pars
 /// value --- The value parser to apply.  
 /// program --- The input to parse.  
 fn parse_loop<'a, Value,>(value: &Parser<Value>, program: &'a [u8],) -> ParseResult<Result<Option<Brainfuck>, &'a [u8]>, &'a [u8]>
-  where Value: ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]>, {
+  where Value: ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]>, {
   //Parses the start of a loop.
   static START_LOOP: Parser<parsers::NextIs<&u8, fn(&&u8) -> bool>> = Parser::next_is(|&&c: &&u8,| c == b'[',);
   //Parses the end of a loop.
@@ -256,7 +255,7 @@ fn parse_loop<'a, Value,>(value: &Parser<Value>, program: &'a [u8],) -> ParseRes
 }
 
 /// The parser function for a complex instruction i.e. a simple instruction or a loop.
-pub type Complex<'a,> = impl ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
+pub type Complex<'a,> = impl ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
 
 /// A `Parser` which attempts to parse a single complex instruction from the input.
 pub fn parse_complex<'a,>() -> Parser<Complex<'a,>> {
@@ -278,12 +277,12 @@ pub fn parse_complex<'a,>() -> Parser<Complex<'a,>> {
 
 /// The parser function for a full program i.e. either a single complex instruction or
 /// seqence of complex instructions.
-pub type Program<'a,> = impl ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
+pub type Program<'a,> = impl ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy;
 
 /// A `Parser` which attempts to parse a complete program.
 pub fn parse_program<'a,>() -> Parser<Program<'a,>> {
   //Parse a sequence of instructions.
-  parse_complex().many1()
+  parse_complex().list1()
   //If the sequence is a single instruction return it alone.
   .map_ok(|mut seq,| if seq.len() > 1 { Brainfuck::Sequence(seq) }
     else { seq.pop().unwrap() },
@@ -291,11 +290,11 @@ pub fn parse_program<'a,>() -> Parser<Program<'a,>> {
 }
 
 /// The parser function which converts the error from a parse into a more usable `io::Error`.
-pub type ErrorParser<'a, P,> = impl ParseFn<&'a [u8], Output = io::Result<Brainfuck>, Remain = &'a [u8]> + Copy;
+pub type ErrorParser<'a, P,> = impl ParseFn<&'a [u8], Value = io::Result<Brainfuck>, Remain = &'a [u8]> + Copy;
 
 /// The `Parser` which converts the error from a parse into a more usable `io::Error`.
 pub fn error_parser<'a, P,>(parser: Parser<P,>,) -> Parser<ErrorParser<'a, P,>>
-  where P: ParseFn<&'a [u8], Output = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy, {
+  where P: ParseFn<&'a [u8], Value = Result<Brainfuck, &'a [u8]>, Remain = &'a [u8]> + Copy, {
   Parser::from_fn(move |program,| {
     //Map the error.
     parser.parse(program,).map_err(|e,| {

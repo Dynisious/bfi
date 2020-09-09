@@ -1,7 +1,7 @@
 //! A Brainfuck intepreter
 //! 
 //! Author --- DMorgan  
-//! Last Modified --- 2020-06-03
+//! Last Modified --- 2020-07-14
 
 #![deny(missing_docs,)]
 #![feature(type_alias_impl_trait, try_blocks, try_trait,)]
